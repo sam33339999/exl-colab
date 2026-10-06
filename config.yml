@@ -1,0 +1,44 @@
+# TabbyAPI config for Swift-1.5-Qwen3.8-27b EXL3 3.5bpw on A100 40GB
+# Unspecified options fall back to TabbyAPI defaults (see config_sample.yml).
+
+network:
+  host: 0.0.0.0
+  port: 5000
+  # Keep auth ON for multi-user access. Keys are in api_tokens.yml (auto-generated on first start).
+  disable_auth: false
+  api_servers: ["OAI"]
+
+logging:
+  log_prompt: false
+  log_generation_params: false
+  log_requests: false
+
+model:
+  model_dir: ../models
+  model_name: Swift-1.5-Qwen3.8-27b-exl3-3.5bpw
+  backend: exllamav3
+  # Max context per request
+  max_seq_len: 32768
+  # Total KV cache shared by ALL concurrent requests (multiple of 256)
+  cache_size: 131072
+  cache_mode: FP16
+  chunk_size: 2048
+  # Max concurrent generation jobs (Tabby default for recurrent/hybrid models is only 4)
+  max_batch_size: 8
+  vision: true
+  reasoning: true
+
+sampling:
+  # Fallback sampler values for clients that don't send them
+  override_preset: safe_defaults
+
+# DFlash2 speculative decoding (block-diffusion draft, lossless)
+# Draft: z-lab/Qwen3.8-27B-DFlash2 (BF16, ~3.9GB, trained on base Qwen3.8-27B)
+# To disable: set draft_mode: disabled
+draft_model:
+  draft_mode: mtp
+  draft_model_dir: ../models
+  draft_model_name: Qwen3.8-27B-DFlash2
+  draft_cache_mode: FP16
+  # default = block_size - 1 = 7 tokens per round; dynamic_draft lowers it when acceptance is low
+  dynamic_draft: true

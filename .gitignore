@@ -1,0 +1,25 @@
+# Models and weights (19GB+)
+models/
+*.safetensors
+*.bin
+*.pt
+*.onnx
+
+# TabbyAPI repository and runtime (managed by start.sh)
+tabbyAPI/
+
+# Server runtime files
+server.log
+server.pid
+*.deb
+
+# Python and environment
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets and tokens
+api_tokens*.yml
+*.key
+*.token
