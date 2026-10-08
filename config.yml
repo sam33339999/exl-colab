@@ -1,5 +1,18 @@
-# TabbyAPI config for Swift-1.5-Qwen3.8-27b EXL3 3.5bpw on A100 40GB
+# Recommended TabbyAPI config for this Colab host (measured 2026-10-08).
 # Unspecified options fall back to TabbyAPI defaults (see config_sample.yml).
+#
+# Host:
+#   GPU:  NVIDIA A100-SXM4-40GB, 40960 MiB, compute capability 8.0, driver 580.82.07
+#   CPU:  Intel Xeon @ 2.20GHz, 6 cores / 12 threads
+#   RAM:  83 GiB, swap 0 (about 77 GiB available at measurement)
+#   Disk: 236 GB overlay, 174 GB free
+#   OS:   Ubuntu 24.04.4 LTS, Linux 6.6.122+
+#
+# Model native context is 262144 (Qwen3.8-27B, no YaRN). Q8 cache of 393216
+# tokens is one full 262K request plus ~128K shared by other live jobs.
+# After load, GPU headroom is about 7.3 GB. sysmem_kv_cache keeps prefixes
+# evicted from the GPU; sysmem_recurrent_cache keeps the Gated DeltaNet states
+# those prefixes need in order to resume. Disk is not a KV tier.
 
 network:
   host: 0.0.0.0
@@ -17,11 +30,12 @@ model:
   model_dir: ../models
   model_name: Swift-1.5-Qwen3.8-27b-exl3-3.5bpw
   backend: exllamav3
-  # Max context per request
-  max_seq_len: 32768
-  # Total KV cache shared by ALL concurrent requests (multiple of 256)
-  cache_size: 131072
-  cache_mode: FP16
+  # Max context per request. Native max_position_embeddings; YaRN is not enabled.
+  max_seq_len: 262144
+  # Shared Paged KV cache for ALL concurrent requests (multiple of 256).
+  # 393216 = 1.5 x 262144. A short job only occupies its real pages (256 tokens each).
+  cache_size: 393216
+  cache_mode: Q8
   chunk_size: 2048
   # Max concurrent generation jobs (Tabby default for recurrent/hybrid models is only 4)
   max_batch_size: 8
@@ -39,6 +53,17 @@ draft_model:
   draft_mode: mtp
   draft_model_dir: ../models
   draft_model_name: Qwen3.8-27B-DFlash2
-  draft_cache_mode: FP16
+  draft_cache_mode: Q8
   # default = block_size - 1 = 7 tokens per round; dynamic_draft lowers it when acceptance is low
   dynamic_draft: true
+
+memory:
+  # Second-tier KV page cache in pinned RAM, MB. 0 disables it.
+  # Holds prefixes evicted from the GPU so a later hit copies them back.
+  # Does not raise the live context above cache_size.
+  sysmem_kv_cache: 24576
+  # Gated DeltaNet checkpoints in system RAM, MB. One checkpoint is ~148 MB.
+  # 12288 MB is about 80 checkpoints, matched to the KV tier above.
+  sysmem_recurrent_cache: 12288
+  # Encoded images kept in RAM so repeated vision turns skip the vision tower.
+  sysmem_multimodal_cache: 1024

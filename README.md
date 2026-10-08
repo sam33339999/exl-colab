@@ -6,12 +6,16 @@
 
 ## 1. 系統硬體與執行環境
 
+2026-10-08 在這台 Google Colab 上實測。可用記憶體與硬碟會隨工作階段變動。
+
 | 項目 | 規格 / 版本 | 備註 |
 |---|---|---|
-| **作業系統** | Ubuntu 24.04.4 LTS (Noble Numbat) | Linux Kernel 6.6.122+ (Google Colab) |
-| **GPU** | NVIDIA A100-SXM4 40GB | Compute Capability 8.0 (Ampere) |
-| **CUDA / Driver** | CUDA 13.0 (nvcc 13.0.88) / Driver 580.82.07 | 支援 PyTorch cu130 系列 |
-| **CPU / 記憶體** | 12 vCPU / 83 GB 系統 RAM | 硬碟空間尚餘 > 190 GB |
+| **作業系統** | Ubuntu 24.04.4 LTS (Noble Numbat) | Linux 6.6.122+ x86_64（Google Colab） |
+| **GPU** | NVIDIA A100-SXM4-40GB | 40960 MiB，Compute Capability 8.0（Ampere） |
+| **CUDA / Driver** | CUDA 13.0 / Driver 580.82.07 | PyTorch `2.11.0+cu130` |
+| **CPU** | Intel Xeon @ 2.20GHz | 1 socket、6 cores、12 threads |
+| **記憶體** | 83 GiB | 測量時可用約 77 GiB。Swap **0** |
+| **硬碟** | overlay 236 GB | 測量時已用 63 GB、可用 174 GB |
 | **Python** | Python 3.13.15 | 搭配 `uv` 管理獨立虛擬環境 `.venv` |
 | **PyTorch** | 2.11.0+cu130 | 支援 CUDA 13.0 |
 | **推論引擎** | ExLlamaV3 1.5.4 (`cu132.torch2.11.0-cp313`) | 預編譯 wheel 整合 Flash Linear Attention |
@@ -47,6 +51,8 @@
 ## 4. 關鍵實驗數據與基準測試 (Benchmarks)
 
 測試腳本：`test_concurrency.py` 與 `bench.sh`（均包含冷啟動暖機流程）。
+
+這一節的數字是在舊設定下記的：`max_seq_len: 32768`、`cache_size: 131072`、`cache_mode: FP16`。目前的推薦值在第 6.4 節。
 
 ### 4.1 多人併發基準測試（Baseline - 無 Draft）
 
@@ -201,13 +207,20 @@
 
 ### 6.4 設定檔與環境防護說明
 
-#### 1. [`config.yml`](file:///content/exl3-server/config.yml) — TabbyAPI 最佳化配置
-針對 A100-SXM4-40GB 硬體特化調校的伺服器核心設定檔：
-* `backend: exllamav3`：啟用 ExLlamaV3 原生高效 Flash Linear Attention 與量化核心。
-* `max_seq_len: 32768`：單一請求最大上下文長度支援達 32K tokens。
-* `cache_size: 131072`：全域共享 Paged KV Cache 大小設定為 128K tokens (FP16)，可充分容納 8~16 人高併發長對話。
-* `max_batch_size: 8`：動態批處理連續佇列最大併發上限。
-* `draft_model`：預設配置 `Qwen3.8-27B-DFlash2` 投機解碼草稿模型，並啟用 `dynamic_draft: true` 依接受率動態調整步數。
+#### 1. [`config.yml`](file:///content/exl3-server/config.yml) — 本機推薦值
+
+依第 1 節這台 Colab 主機寫入的日常設定。模型原生上下文是 **262,144**，這份設定不開 YaRN。
+
+* `max_seq_len: 262144`：單次請求上限，等於模型 `config.json` 的 `max_position_embeddings`。
+* `cache_size: 393216`：共用 Paged KV cache，等於 1.5 份 262K。一條請求可以吃滿 262K，其餘約 13 萬 token 給同時在跑的較短任務。短任務只占用實際頁數（256 token 一頁）。以 Q8 估算，載入後 GPU 大約還剩 7.3 GB。
+* `cache_mode: Q8`、`draft_cache_mode: Q8`：主模型 16 層 full attention 與 MTP 那 1 層的 KV 都用 8-bit。
+* `max_batch_size: 8`：同時生成的上限。
+* `memory.sysmem_kv_cache: 24576`：24 GB pinned RAM，承接從 GPU 擠出的 KV page。命中時拷回 GPU，不再重跑 prefill。這不會把單條上下文拉過 `cache_size`。硬碟沒有 KV 層。
+* `memory.sysmem_recurrent_cache: 12288`：12 GB，大約 80 個 Gated DeltaNet 檢查點（每個約 148 MB）。這個混合模型要接回前綴，KV 和 recurrent 狀態要一起留。
+* `memory.sysmem_multimodal_cache: 1024`：重複出現的圖片不必重跑 vision tower。
+* `draft_mode: mtp`：使用模型內建 MTP，並開啟 `dynamic_draft: true`。
+
+`start.sh` 只在 `tabbyAPI/config.yml` 不存在時才從這份檔案複製。執行中的服務要重開才會吃到新值。單條要超過 262K 時另開一份設定：YaRN `factor` 4、Q4 cache、`max_batch_size: 1`。靜態 YaRN 會讓短文變差，而且 Q4 的 1M cache 在這張 40GB 上只剩約 1.7 GB。
 
 #### 2. [`.gitignore`](file:///content/exl3-server/.gitignore) — 倉庫輕量化與機密安全防護
 確保代碼倉庫體積保持在 36KB 的關鍵防線：
