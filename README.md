@@ -107,7 +107,8 @@
 ├── stop.sh                  # [Shell]  優雅停機、釋放 GPU 顯存與清理進程腳本
 ├── bench.sh                 # [Shell]  全情境性能基準測試套件 (涵蓋中文、併發、代碼、英文)
 ├── test_concurrency.py      # [Python] 多線程併發壓力測試工具 (計算單人 tok/s 與總吞吐量)
-├── config.yml               # [YAML]   TabbyAPI 伺服器配置樣板 (已調校 A100 40GB 最佳參數)
+├── config.yml               # [YAML]   每次啟動都會套用的 TabbyAPI 設定（推薦值）
+├── docs/kv-cache-benchmark.md  # [Doc]  KV 沒命中 / 有命中的 prefill、decode、TTFT
 ├── .gitignore               # [Git]    倉庫防護設定 (排除 19GB 權重、虛擬環境、金鑰與日誌)
 ├── README.md                # [Doc]    繁體中文專案技術文件與實驗記錄
 ├── server.log               # [Log]    伺服器執行日誌 (包含每次請求之 Token 產速，已被 gitignore)
@@ -130,16 +131,18 @@
 * **核心功能流程**：
   1. **自動環境建置 (`ensure_setup`)**：檢查系統是否安裝 `uv`，若無則自動下載安裝；自動檢測 `tabbyAPI` 目錄（缺失時自動從 GitHub clone）；若無 `.venv` 則自動建立 Python 3.13 虛擬環境並安裝 ExLlamaV3 (`.[cu13]`)。
   2. **模型自動補全**：檢測 `models/` 目錄下是否存在 `.safetensors` 權重檔，缺失時自動透過 Hugging Face Hub 下載指定模型。
-  3. **投機解碼模式即時切換**：讀取環境變數 `DRAFT`，自動就地修改 `tabbyAPI/config.yml` 中的 `draft_mode`（支援 `dflash2`、`mtp`、`off`）。
-  4. **背景守護與 PID 管理 (`--bg`)**：使用 `setsid nohup` 脫鉤終端並在背景啟動服務，自動將 PID 寫入 `server.pid`，所有輸出重新導向至 `server.log`。
-  5. **健康檢查輪詢 (Healthcheck Loop)**：背景啟動後自動輪詢 `http://127.0.0.1:5000/health`（最長等待 180 秒），待模型加載完畢並呈現 Ready 狀態時，自動從 `api_tokens.yml` 抓取並顯示 API Key 與 Admin Key。
+  3. **套用自訂設定**：每次啟動都把倉庫的 `config.yml` 複製成 `tabbyAPI/config.yml`。要改上下文、cache 或記憶體層，改倉庫這份再重開。
+  4. **投機解碼模式即時切換**：讀取環境變數 `DRAFT`，在複製後改寫 `draft_mode`（`dflash2`、`mtp`、`off`）。未設定時沿用 `config.yml` 裡的 `mtp`。
+  5. **背景守護與 PID 管理 (`--bg`)**：使用 `setsid nohup` 脫鉤終端並在背景啟動服務，自動將 PID 寫入 `server.pid`，所有輸出重新導向至 `server.log`。已在跑時會拒絕再起一個。
+  6. **健康檢查輪詢 (Healthcheck Loop)**：背景啟動後自動輪詢 `http://127.0.0.1:5000/health`（最長等待 180 秒），待模型加載完畢並呈現 Ready 狀態時，自動從 `api_tokens.yml` 抓取並顯示 API Key 與 Admin Key。
 * **支援參數與環境變數**：
   | 參數 / 變數 | 說明 | 範例 |
   |---|---|---|
   | *(無參數)* | 前景直接執行，日誌直接輸出到終端（適合開發除錯） | `./start.sh` |
-  | `--bg` | 在背景守護行程中啟動，並自動監聽 Ready 狀態 | `./start.sh --bg` |
+  | `--bg` | 一鍵背景啟動，並自動監聽 Ready 狀態 | `./start.sh --bg` |
   | `--stop` | 調用 `stop.sh` 停止正在背景運行的服務 | `./start.sh --stop` |
   | `--download` | 僅執行模型下載程序，不啟動伺服器 | `./start.sh --download` |
+  | `--help`, `-h` | 印出用法 | `./start.sh --help` |
   | `DRAFT=<mode>` | 指定投機解碼模式：`dflash2`（草稿模型）、`mtp`（內建多Token預測）、`off`（關閉） | `DRAFT=mtp ./start.sh --bg` |
 
 ---
@@ -220,7 +223,11 @@
 * `memory.sysmem_multimodal_cache: 1024`：重複出現的圖片不必重跑 vision tower。
 * `draft_mode: mtp`：使用模型內建 MTP，並開啟 `dynamic_draft: true`。
 
-`start.sh` 只在 `tabbyAPI/config.yml` 不存在時才從這份檔案複製。執行中的服務要重開才會吃到新值。單條要超過 262K 時另開一份設定：YaRN `factor` 4、Q4 cache、`max_batch_size: 1`。靜態 YaRN 會讓短文變差，而且 Q4 的 1M cache 在這張 40GB 上只剩約 1.7 GB。
+`./start.sh` 每次啟動都會把這份 `config.yml` 複製到 `tabbyAPI/config.yml` 再啟動。執行中的服務要 `./start.sh --stop` 之後再啟動才會吃到新值。單條要超過 262K 時另開一份設定：YaRN `factor` 4、Q4 cache、`max_batch_size: 1`。靜態 YaRN 會讓短文變差，而且 Q4 的 1M cache 在這張 40GB 上只剩約 1.7 GB。
+
+KV cache **沒有時間過期**。請求結束後，寫滿的 page（256 token）一直留著，直到池子不夠才淘汰：先拿空白頁和已經斷掉的頁，再從最久沒被用到的舊對話尾巴開始砍。從 GPU 擠出的完整 page 會進 24 GB 的 RAM 第二層，之後命中就拷回，不必重跑 prefill。RAM 那層也是滿了才丟。重開伺服器才會一次清空。
+
+這個混合模型要接回前綴，還得留著對應的 Gated DeltaNet 檢查點（`sysmem_recurrent_cache`，12 GB，滿了才丟）。KV page 還在、檢查點沒了，那段前綴一樣整段重算。數字見 [`docs/kv-cache-benchmark.md`](docs/kv-cache-benchmark.md)：沒命中時單流 TTFT 1.16 s、8 人平均 7.49 s；完整頁命中（97.9%，尾巴 49 token 仍重算）時單流 TTFT 0.24 s、8 人平均 1.24 s。Decode 兩邊都在同一量級。
 
 #### 2. [`.gitignore`](file:///content/exl3-server/.gitignore) — 倉庫輕量化與機密安全防護
 確保代碼倉庫體積保持在 36KB 的關鍵防線：
@@ -235,10 +242,13 @@
 
 ### 7.1 啟動與切換投機解碼模式
 
-`start.sh` 支援環境變數 `DRAFT` 快速切換：
+一鍵背景啟動會套用倉庫的 `config.yml`（Q8、262K、cache 393216）：
 
 ```bash
-cd /content/exl3-server
+cd /content/exl-colab
+
+./start.sh --help
+./start.sh --bg
 
 # 1. 以 DFlash2 模式啟動 (適合代碼、英文、單人極致速度)
 DRAFT=dflash2 ./start.sh --bg
