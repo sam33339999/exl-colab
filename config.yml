@@ -28,7 +28,8 @@ logging:
 
 model:
   model_dir: ../models
-  model_name: Swift-1.5-Qwen3.8-27b-exl3-3.5bpw
+  # Folder name and the id /v1/models returns. start.sh overwrites this from MODEL_NAME in .env.
+  model_name: Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw
   backend: exllamav3
   # Max context per request. Native max_position_embeddings; YaRN is not enabled.
   max_seq_len: 262144
@@ -46,15 +47,20 @@ sampling:
   # Fallback sampler values for clients that don't send them
   override_preset: safe_defaults
 
-# DFlash2 speculative decoding (block-diffusion draft, lossless)
-# Draft: z-lab/Qwen3.8-27B-DFlash2 (BF16, ~3.9GB, trained on base Qwen3.8-27B)
+# Speculative decoding. This checkpoint already contains the MTP head
+# (8 linear layers at 4 bpw). draft_mode mtp reads that head; it does not
+# load draft_model_name. MTP and DFlash2 must not run together.
+# Companion draft, only with DRAFT=dflash2:
+#   sam33339999/Qwen3.8-27B-Coder390-dflash2 (EXL3 5.0bpw, ~1.37 GiB, block 7)
 # To disable: set draft_mode: disabled
 draft_model:
   draft_mode: mtp
   draft_model_dir: ../models
-  draft_model_name: Qwen3.8-27B-DFlash2
+  draft_model_name: Qwen3.8-27B-Coder390-dflash2
   draft_cache_mode: Q8
-  # default = block_size - 1 = 7 tokens per round; dynamic_draft lowers it when acceptance is low
+  # MTP sweet spot measured in ExLlamaV3 (default_draft_size). DRAFT=dflash2
+  # rewrites this to 7 (block_size - 1). dynamic_draft lowers it when acceptance is low.
+  draft_num_tokens: 4
   dynamic_draft: true
 
 memory:

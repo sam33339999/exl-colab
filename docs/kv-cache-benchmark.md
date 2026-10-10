@@ -1,6 +1,6 @@
 # KV cache 基準：沒命中 vs 有命中
 
-2026-10-08，這台 Colab（A100-SXM4 40GB、83 GiB RAM、swap 0；規格見 README 第 1 節）。服務用 `config.yml` 的推薦值：
+2026-10-08，這台 Colab（A100-SXM4 40GB、83 GiB RAM、swap 0；規格見 README 第 1 節）。當時載入的是 Swift-1.5 EXL3，不是現在的 Coder390。服務用當時 `config.yml` 的推薦值：
 
 * `max_seq_len: 262144`
 * `cache_size: 393216`（Q8，主模型與 MTP 草稿都是 Q8）

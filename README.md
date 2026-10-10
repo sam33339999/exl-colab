@@ -1,6 +1,6 @@
 # Qwen3.8-27B EXL3 推論伺服器架構與完整實驗紀錄
 
-本專案使用 **ExLlamaV3 1.5.4** 作為推論後端，搭配 **TabbyAPI** 提供相容於 OpenAI 的 REST API 服務，部署於 NVIDIA A100-SXM4-40GB 上，針對自定義量化模型 `sam33339999/Swift-1.5-Qwen3.8-27b-Uncensored-exl3-3.5bpw` 進行多用戶併發優化與投機解碼（Speculative Decoding）實驗。
+本專案使用 **ExLlamaV3 1.5.4** 作為推論後端，搭配 **TabbyAPI** 提供相容於 OpenAI 的 REST API 服務，部署於 NVIDIA A100-SXM4-40GB 上。目前載入的模型是 `sam33339999/Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw`。第 4 節的速度數字是換模型之前，在 `sam33339999/Swift-1.5-Qwen3.8-27b-Uncensored-exl3-3.5bpw` 上量到的。
 
 ---
 
@@ -39,12 +39,15 @@
 
 ## 3. 模型規格
 
-- **主模型**：`sam33339999/Swift-1.5-Qwen3.8-27b-Uncensored-exl3-3.5bpw`
-  - **基礎架構**：`Qwen3_5ForConditionalGeneration`（Hybrid Linear Attention + Full Attention，每 4 層有 1 層為 Full Attention，其餘為線性注意力，大幅壓低 KV Cache 記憶體增長）。
-  - **特性**：Multimodal (Vision/Video) 支援、Abliterated (Uncensored)、原生包含 MTP (Multi-Token Prediction) 模組。
-  - **模型大小**：~15 GB（EXL3 3.5bpw）。
-- **投機解碼草稿模型 (Draft)**：`z-lab/Qwen3.8-27B-DFlash2`
-  - **架構**：`DFlash2DraftModel`（Block-Diffusion 草稿預測，BF16，~3.6 GB）。
+- **主模型**：`sam33339999/Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw`
+  - **來源**：`nerkyor/Qwen3.8-27B-Coder390-EfficientThink-Opus5.5-GPT6Astra-Grok4.7-DSV4Pro-K3-SFT-RLOO-MTP-DFlash2` 的 BF16，用 exllamav3 1.4.2 轉成 EXL3。
+  - **基礎架構**：`Qwen3_5ForConditionalGeneration`。64 層混合注意力（每 4 層 1 層 Full Attention），hidden 5120，詞表 248320，原生上下文 262144。
+  - **量化**：文字塔平均 3.5 bpw，`lm_head` 6 bit，MTP 的 8 個線性層 4 bpw，視覺塔、embedding、norm 維持 BF16。目錄約 14.3 GiB。
+  - **MTP**：頭已經在這個目錄裡（`mtp_num_hidden_layers: 1`）。預設 `draft_mode: mtp`、`draft_num_tokens: 4`，不用再下第二個模型。
+  - **視覺**：權重在檢查點裡，`vision: true`。發布者沒有跑過圖像輸入。
+- **可選草稿（不要和 MTP 同時開）**：`sam33339999/Qwen3.8-27B-Coder390-dflash2`
+  - **架構**：`DFlash2DraftModel`，EXL3 5.0 bpw，約 1.37 GiB，`block_size` 8，一次草稿 7 token。
+  - 用 `DRAFT=dflash2 ./start.sh --bg` 才會下載並載入。舊的 `z-lab/Qwen3.8-27B-DFlash2` 是基座草稿，不配這份微調。
 
 ---
 
@@ -114,8 +117,8 @@
 ├── server.log               # [Log]    伺服器執行日誌 (包含每次請求之 Token 產速，已被 gitignore)
 ├── server.pid               # [Runtime]背景進程 PID 記錄檔 (已被 gitignore)
 ├── models/                  # [Weights]模型權重存放目錄 (已被 gitignore)
-│   ├── Swift-1.5-Qwen3.8-27b-exl3-3.5bpw/ # 主模型 (~15GB)
-│   └── Qwen3.8-27B-DFlash2/               # DFlash2 草稿模型 (~3.6GB)
+│   ├── Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw/ # 主模型，內建 MTP (~14.3 GiB)
+│   └── Qwen3.8-27B-Coder390-dflash2/         # 可選 DFlash2 草稿 (~1.37 GiB)
 └── tabbyAPI/                # [Submodule/Upstream] 推論引擎服務代碼與環境 (已被 gitignore)
     ├── api_tokens.yml       # 自動生成的 API/Admin 金鑰 (已被 gitignore)
     └── .venv/               # Python 3.13 + Torch 2.11 + cu130 虛擬環境
@@ -221,7 +224,7 @@
 * `memory.sysmem_kv_cache: 24576`：24 GB pinned RAM，承接從 GPU 擠出的 KV page。命中時拷回 GPU，不再重跑 prefill。這不會把單條上下文拉過 `cache_size`。硬碟沒有 KV 層。
 * `memory.sysmem_recurrent_cache: 12288`：12 GB，大約 80 個 Gated DeltaNet 檢查點（每個約 148 MB）。這個混合模型要接回前綴，KV 和 recurrent 狀態要一起留。
 * `memory.sysmem_multimodal_cache: 1024`：重複出現的圖片不必重跑 vision tower。
-* `draft_mode: mtp`：使用模型內建 MTP，並開啟 `dynamic_draft: true`。
+* `draft_mode: mtp`、`draft_num_tokens: 4`：使用檢查點內建 MTP，並開啟 `dynamic_draft: true`。`DRAFT=dflash2` 會改成 `draft_mode: model`、`draft_num_tokens: 7`，並載入同系列 DFlash2。兩種加速不要同時開。
 
 `./start.sh` 每次啟動都會把這份 `config.yml` 複製到 `tabbyAPI/config.yml` 再啟動。執行中的服務要 `./start.sh --stop` 之後再啟動才會吃到新值。單條要超過 262K 時另開一份設定：YaRN `factor` 4、Q4 cache、`max_batch_size: 1`。靜態 YaRN 會讓短文變差，而且 Q4 的 1M cache 在這張 40GB 上只剩約 1.7 GB。
 
@@ -250,13 +253,13 @@ cd /content/exl-colab
 ./start.sh --help
 ./start.sh --bg
 
-# 1. 以 DFlash2 模式啟動 (適合代碼、英文、單人極致速度)
+# 1. 預設：檢查點內建 MTP（draft_num_tokens 4）
+./start.sh --bg
+
+# 2. 改用同系列 DFlash2 草稿（會另下載約 1.37 GiB，draft_num_tokens 7）
 DRAFT=dflash2 ./start.sh --bg
 
-# 2. 以 MTP 模式啟動 (最均衡，省顯存且通用性佳)
-DRAFT=mtp ./start.sh --bg
-
-# 3. 關閉 Draft 模式 (最適合多人高併發與長上下文對話)
+# 3. 關閉 Draft
 DRAFT=off ./start.sh --bg
 
 # 停止伺服器 (兩種方式皆可)
@@ -286,7 +289,7 @@ python3 test_concurrency.py 8
     -H "Authorization: Bearer $KEY" \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Swift-1.5-Qwen3.8-27b",
+      "model": "Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw",
       "messages": [{"role": "user", "content": "你好！"}],
       "temperature": 0.7
     }'
