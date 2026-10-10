@@ -28,7 +28,7 @@ logging:
 
 model:
   model_dir: ../models
-  # Folder name and the id /v1/models returns. start.sh overwrites this from MODEL_NAME in .env.
+  # Folder name and the id /v1/models returns. start.sh overwrites this from MODEL_NAME.
   model_name: Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw
   backend: exllamav3
   # Max context per request. Native max_position_embeddings; YaRN is not enabled.

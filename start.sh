@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Quick start: TabbyAPI + ExLlamaV3 serving Qwen3.8-27B-Coder390 (EXL3 3.5bpw, built-in MTP)
+# Quick start: TabbyAPI + ExLlamaV3. The model comes from .env
+# (.env.coder390 or .env.swift). ENV_FILE selects one for a single launch.
 #
 # Usage: ./start.sh [--bg|--stop|--download|--help]
 # Each start copies ./config.yml over tabbyAPI/config.yml, then applies $DRAFT.
@@ -10,11 +11,25 @@ TABBY="$ROOT/tabbyAPI"
 PIDFILE="$ROOT/server.pid"
 LOG="$ROOT/server.log"
 
-# .env is the source for the provider-facing model name. A value already
+# Model file. ENV_FILE overrides .env for this launch. A value already
 # exported in the shell wins over the file.
 load_dotenv() {
-  local line key value
-  [ -f "$ROOT/.env" ] || return 0
+  local file line key value
+  if [ -n "${ENV_FILE:-}" ]; then
+    case "$ENV_FILE" in
+      /*) file="$ENV_FILE" ;;
+      *) file="$ROOT/$ENV_FILE" ;;
+    esac
+    if [ ! -f "$file" ]; then
+      echo "[!] Env file not found: $file"
+      echo "    Use .env, .env.coder390, or .env.swift"
+      exit 1
+    fi
+  else
+    file="$ROOT/.env"
+    [ -f "$file" ] || return 0
+  fi
+  echo "[*] Env file: ${file#"$ROOT"/}"
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       ''|\#*) continue ;;
@@ -24,20 +39,8 @@ load_dotenv() {
     if [ -z "${!key+x}" ]; then
       export "$key=$value"
     fi
-  done < "$ROOT/.env"
+  done < "$file"
 }
-load_dotenv
-
-export MODEL_REPO="${MODEL_REPO:-sam33339999/Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw}"
-# Id returned by /v1/models. Other providers register this exact string.
-export MODEL_NAME="${MODEL_NAME:-Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw}"
-export MODEL_DIR="${MODEL_DIR:-$ROOT/models/${MODEL_NAME}}"
-export DRAFT_REPO="${DRAFT_REPO:-sam33339999/Qwen3.8-27B-Coder390-dflash2}"
-export DRAFT_NAME="${DRAFT_NAME:-Qwen3.8-27B-Coder390-dflash2}"
-export DRAFT_DIR="${DRAFT_DIR:-$ROOT/models/${DRAFT_NAME}}"
-# TabbyAPI applies TABBY_<section>_<field> on top of config.yml.
-export TABBY_MODEL_MODEL_NAME="$MODEL_NAME"
-export TABBY_DRAFT_MODEL_DRAFT_MODEL_NAME="$DRAFT_NAME"
 
 usage() {
   cat <<EOF
@@ -53,7 +56,12 @@ Options:
   --download    Download the model only
   --help, -h    Show this help
 
-Environment (defaults live in .env; an already-exported value wins):
+Environment (model defaults live in .env; an already-exported value wins):
+  ENV_FILE
+      Model file for this launch. A relative path is from the repo root.
+      Unset loads .env, which matches .env.coder390 until you copy over it.
+      .env.coder390   Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw
+      .env.swift      Swift-1.5-Qwen3.8-27b-exl3-3.5bpw
   MODEL_NAME
       Model id other providers register. This is the /v1/models id and the
       weights folder name. Printed again after the model finishes loading.
@@ -62,12 +70,14 @@ Environment (defaults live in .env; an already-exported value wins):
   DRAFT=mtp|dflash2|off
       Override draft_mode after the config copy.
       mtp uses the MTP head inside the checkpoint (draft_num_tokens 4).
-      dflash2 downloads the matching Coder390 draft and loads it instead
+      dflash2 downloads DRAFT_REPO from the selected env file and loads it
       (draft_mode model, draft_num_tokens 7). MTP and DFlash2 are not combined.
       Unset keeps the value in config.yml (currently mtp).
 
 Examples:
   ./start.sh --bg
+  ENV_FILE=.env.swift ./start.sh --bg
+  ENV_FILE=.env.coder390 ./start.sh --bg
   DRAFT=off ./start.sh --bg
   DRAFT=dflash2 ./start.sh --bg
   ./start.sh --stop
@@ -163,6 +173,22 @@ case "${1:-}" in
     usage; exit 0 ;;
   --stop)
     exec "$ROOT/stop.sh" ;;
+esac
+
+load_dotenv
+
+export MODEL_REPO="${MODEL_REPO:-sam33339999/Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw}"
+# Id returned by /v1/models. Other providers register this exact string.
+export MODEL_NAME="${MODEL_NAME:-Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw}"
+export MODEL_DIR="${MODEL_DIR:-$ROOT/models/${MODEL_NAME}}"
+export DRAFT_REPO="${DRAFT_REPO:-sam33339999/Qwen3.8-27B-Coder390-dflash2}"
+export DRAFT_NAME="${DRAFT_NAME:-Qwen3.8-27B-Coder390-dflash2}"
+export DRAFT_DIR="${DRAFT_DIR:-$ROOT/models/${DRAFT_NAME}}"
+# TabbyAPI applies TABBY_<section>_<field> on top of config.yml.
+export TABBY_MODEL_MODEL_NAME="$MODEL_NAME"
+export TABBY_DRAFT_MODEL_DRAFT_MODEL_NAME="$DRAFT_NAME"
+
+case "${1:-}" in
   --download)
     download_model; exit 0 ;;
   --bg|"")

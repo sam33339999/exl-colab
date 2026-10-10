@@ -111,6 +111,9 @@
 ├── bench.sh                 # [Shell]  全情境性能基準測試套件 (涵蓋中文、併發、代碼、英文)
 ├── test_concurrency.py      # [Python] 多線程併發壓力測試工具 (計算單人 tok/s 與總吞吐量)
 ├── config.yml               # [YAML]   每次啟動都會套用的 TabbyAPI 設定（推薦值）
+├── .env                     # [Env]    預設模型檔。目前內容與 .env.coder390 相同
+├── .env.coder390            # [Env]    Coder390（EXL3 3.5bpw，內建 MTP）
+├── .env.swift               # [Env]    Swift-1.5 Qwen（EXL3 3.5bpw，第 4 節的舊模型）
 ├── docs/kv-cache-benchmark.md  # [Doc]  KV 沒命中 / 有命中的 prefill、decode、TTFT
 ├── .gitignore               # [Git]    倉庫防護設定 (排除 19GB 權重、虛擬環境、金鑰與日誌)
 ├── README.md                # [Doc]    繁體中文專案技術文件與實驗記錄
@@ -146,6 +149,7 @@
   | `--stop` | 調用 `stop.sh` 停止正在背景運行的服務 | `./start.sh --stop` |
   | `--download` | 僅執行模型下載程序，不啟動伺服器 | `./start.sh --download` |
   | `--help`, `-h` | 印出用法 | `./start.sh --help` |
+  | `ENV_FILE=<path>` | 這次啟動改讀哪一份模型檔。相對路徑從倉庫根目錄算。未設定時讀 `.env` | `ENV_FILE=.env.swift ./start.sh --bg` |
   | `DRAFT=<mode>` | 指定投機解碼模式：`dflash2`（草稿模型）、`mtp`（內建多Token預測）、`off`（關閉） | `DRAFT=mtp ./start.sh --bg` |
 
 ---
@@ -251,12 +255,24 @@ KV cache **沒有時間過期**。請求結束後，寫滿的 page（256 token�
 cd /content/exl-colab
 
 ./start.sh --help
+
+# 預設讀 .env（目前是 Coder390）。已在跑要先 ./start.sh --stop。
 ./start.sh --bg
 
-# 1. 預設：檢查點內建 MTP（draft_num_tokens 4）
+# 這次改走 Swift-1.5。權重不在 models/ 時會下載。
+ENV_FILE=.env.swift ./start.sh --bg
+
+# 這次改走 Coder390
+ENV_FILE=.env.coder390 ./start.sh --bg
+
+# 把預設改掉，之後不用再帶 ENV_FILE
+cp .env.swift .env
+cp .env.coder390 .env
+
+# 1. 檢查點內建 MTP（draft_num_tokens 4）
 ./start.sh --bg
 
-# 2. 改用同系列 DFlash2 草稿（會另下載約 1.37 GiB，draft_num_tokens 7）
+# 2. 改用該模型檔裡的 DFlash2 草稿（draft_num_tokens 7）
 DRAFT=dflash2 ./start.sh --bg
 
 # 3. 關閉 Draft
