@@ -133,15 +133,27 @@ print("\n".join(item.get("id","") for item in data if item.get("id")))' 2>/dev/n
   } | tee -a "$LOG"
 }
 
+# An empty venv still has an executable python. Require the runtime
+# packages, or a half-finished install is treated as ready and main.py
+# dies on the first import. find_spec does not import torch.
+deps_ready() {
+  [ -x "$TABBY/.venv/bin/python" ] || return 1
+  "$TABBY/.venv/bin/python" -c 'import importlib.util, sys
+sys.exit(0 if all(importlib.util.find_spec(n) for n in ("loguru", "torch", "exllamav3")) else 1)'
+}
+
 ensure_setup() {
   command -v uv >/dev/null || { echo "[*] Installing uv"; curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$HOME/.local/bin:$PATH"; }
   if [ ! -d "$TABBY" ]; then
     echo "[*] Cloning TabbyAPI..."
     git clone https://github.com/theroyallab/tabbyAPI.git "$TABBY"
   fi
-  if [ ! -x "$TABBY/.venv/bin/python" ]; then
-    echo "[*] Creating venv + installing TabbyAPI/ExLlamaV3 (cu13)"
-    (cd "$TABBY" && uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -e ".[cu13]")
+  if ! deps_ready; then
+    echo "[*] Installing TabbyAPI/ExLlamaV3 (cu13)"
+    if [ ! -x "$TABBY/.venv/bin/python" ]; then
+      (cd "$TABBY" && uv venv --python 3.13 .venv)
+    fi
+    (cd "$TABBY" && uv pip install --python .venv/bin/python -e ".[cu13]")
   fi
   ls "$MODEL_DIR"/*.safetensors >/dev/null 2>&1 || download_model
 }
