@@ -62,6 +62,7 @@ Environment (model defaults live in .env; an already-exported value wins):
       Unset loads .env, which matches .env.coder390 until you copy over it.
       .env.coder390   Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw
       .env.swift      Swift-1.5-Qwen3.8-27b-exl3-3.5bpw
+      .env.minicpm    MiniCPM-V-4.7-35B-A3B EXL3 4bpw (no MTP, batch 1)
   MODEL_NAME
       Model id other providers register. This is the /v1/models id and the
       weights folder name. Printed again after the model finishes loading.
@@ -78,6 +79,7 @@ Examples:
   ./start.sh --bg
   ENV_FILE=.env.swift ./start.sh --bg
   ENV_FILE=.env.coder390 ./start.sh --bg
+  ENV_FILE=.env.minicpm ./start.sh --bg
   DRAFT=off ./start.sh --bg
   DRAFT=dflash2 ./start.sh --bg
   ./start.sh --stop
@@ -156,7 +158,7 @@ ensure_setup() {
   command -v uv >/dev/null || { echo "[*] Installing uv"; curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$HOME/.local/bin:$PATH"; }
   if [ ! -d "$TABBY" ]; then
     echo "[*] Cloning TabbyAPI..."
-    git clone https://github.com/theroyallab/tabbyAPI.git "$TABBY"
+    git clone --branch feat/minicpm-v4.7 https://github.com/sam33339999/tabbyAPI.git "$TABBY"
   fi
   if ! deps_ready; then
     echo "[*] Installing TabbyAPI/ExLlamaV3 (cu13)"
