@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Quick start: TabbyAPI + ExLlamaV3. The model comes from .env
-# (.env.coder390 or .env.swift). ENV_FILE selects one for a single launch.
+# (.env.coder390, .env.swift, or .env.minicpm). ENV_FILE selects one launch.
+# A MiniCPM checkpoint also gets its adapter wheel, matching torchvision,
+# and accelerate installed into tabbyAPI/.venv. See README section 7.1.
 #
 # Usage: ./start.sh [--bg|--stop|--download|--help]
 # Each start copies ./config.yml over tabbyAPI/config.yml, then applies $DRAFT.
@@ -154,6 +156,50 @@ deps_ready() {
 sys.exit(0 if all(importlib.util.find_spec(n) for n in ("loguru", "torch", "exllamav3")) else 1)'
 }
 
+# MiniCPM-V 4.7 checkpoints ship minicpm47_exl3 inside the weight folder.
+# TabbyAPI raises before load if that module is missing. --no-deps keeps the
+# cu13 torch and exllamav3 stack: the wheel's own metadata pins torch 2.10
+# and a git build of exllamav3, which would replace them.
+# With vision left on, load also builds AutoProcessor (torchvision) and
+# VisionBridge (accelerate.init_empty_weights). torchvision tracks the cu13
+# torch already installed: torch 2.N uses torchvision 0.(N+15).
+adapter_ready() {
+  "$TABBY/.venv/bin/python" -c 'import importlib.util,sys; sys.exit(0 if importlib.util.find_spec("minicpm47_exl3") else 1)'
+}
+
+spec_ready() {
+  "$TABBY/.venv/bin/python" -c 'import importlib.util,sys; sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)' "$1"
+}
+
+ensure_adapter() {
+  local wheel torch_before torch_after tv
+  wheel=$(find "$MODEL_DIR" -path '*/adapter/dist/minicpm47_exl3-*.whl' -print -quit 2>/dev/null || true)
+  if [ -z "$wheel" ]; then
+    return 0
+  fi
+  if adapter_ready; then
+    echo "[*] MiniCPM adapter already installed"
+  else
+    echo "[*] Installing MiniCPM adapter: ${wheel#"$ROOT"/}"
+    (cd "$TABBY" && uv pip install --python .venv/bin/python --no-deps "$wheel")
+  fi
+  torch_before=$("$TABBY/.venv/bin/python" -c 'import torch; print(torch.__version__)')
+  if ! spec_ready torchvision; then
+    tv=$("$TABBY/.venv/bin/python" -c 'import torch; v=torch.__version__.split("+")[0].split("."); print(f"0.{int(v[1]) + 15}.{v[2]}")')
+    echo "[*] Installing torchvision==${tv} for torch ${torch_before}"
+    (cd "$TABBY" && uv pip install --python .venv/bin/python "torchvision==${tv}" --index-url https://download.pytorch.org/whl/cu130)
+  fi
+  if ! spec_ready accelerate; then
+    echo "[*] Installing accelerate for the MiniCPM vision bridge"
+    (cd "$TABBY" && uv pip install --python .venv/bin/python accelerate)
+  fi
+  torch_after=$("$TABBY/.venv/bin/python" -c 'import torch; print(torch.__version__)')
+  if [ "$torch_before" != "$torch_after" ]; then
+    echo "[!] Adapter setup replaced torch (${torch_before} -> ${torch_after})"
+    exit 1
+  fi
+}
+
 ensure_setup() {
   command -v uv >/dev/null || { echo "[*] Installing uv"; curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$HOME/.local/bin:$PATH"; }
   if [ ! -d "$TABBY" ]; then
@@ -168,6 +214,7 @@ ensure_setup() {
     (cd "$TABBY" && uv pip install --python .venv/bin/python -e ".[cu13]")
   fi
   ls "$MODEL_DIR"/*.safetensors >/dev/null 2>&1 || download_model
+  ensure_adapter
 }
 
 case "${1:-}" in
