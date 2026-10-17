@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minicpm47-exl3"
+version = "0.0.0"
+description = "No-op register() so TabbyAPI can load the native exllamav3 MiniCPM-V 4.7 class."
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["minicpm47_exl3*"]

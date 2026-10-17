@@ -63,6 +63,10 @@ Environment (model defaults live in .env; an already-exported value wins):
       .env.coder390   Qwen3.8-27B-Coder390-MTP-Exl3-3.5bpw
       .env.swift      Swift-1.5-Qwen3.8-27b-exl3-3.5bpw
       .env.minicpm    MiniCPM-V-4.7-35B-A3B EXL3 4bpw (no MTP, batch 1)
+      .env.minicpm-3090
+                  This machine's 3.5bpw abliterated dir. Do not call start.sh
+                  on it directly. Use ./start-minicpm-3090.sh so the local
+                  exllamav3 checkout and CUDA 13.3 stay in place.
   MODEL_NAME
       Model id other providers register. This is the /v1/models id and the
       weights folder name. Printed again after the model finishes loading.
@@ -80,6 +84,7 @@ Examples:
   ENV_FILE=.env.swift ./start.sh --bg
   ENV_FILE=.env.coder390 ./start.sh --bg
   ENV_FILE=.env.minicpm ./start.sh --bg
+  ./start-minicpm-3090.sh --bg
   DRAFT=off ./start.sh --bg
   DRAFT=dflash2 ./start.sh --bg
   ./start.sh --stop

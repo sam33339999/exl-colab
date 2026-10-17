@@ -16,6 +16,7 @@ server.pid
 # Python and environment
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 
