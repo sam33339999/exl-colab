@@ -111,7 +111,7 @@
 ├── bench.sh                 # [Shell]  全情境性能基準測試套件 (涵蓋中文、併發、代碼、英文)
 ├── test_concurrency.py      # [Python] 多線程併發壓力測試工具 (計算單人 tok/s 與總吞吐量)
 ├── config.yml               # [YAML]   每次啟動都會套用的 TabbyAPI 設定（推薦值）
-├── .env                     # [Env]    預設模型檔。目前內容與 .env.coder390 相同
+├── .env                     # [Env]    預設模型檔。目前內容與 .env.minicpm 相同
 ├── .env.coder390            # [Env]    Coder390（EXL3 3.5bpw，內建 MTP）
 ├── .env.swift               # [Env]    Swift-1.5 Qwen（EXL3 3.5bpw，第 4 節的舊模型）
 ├── docs/kv-cache-benchmark.md  # [Doc]  KV 沒命中 / 有命中的 prefill、decode、TTFT
@@ -135,8 +135,8 @@
 本專案的主要進入點，具備全自動化環境配置、動態模式切換與背景守護能力。
 
 * **核心功能流程**：
-  1. **自動環境建置 (`ensure_setup`)**：檢查系統是否安裝 `uv`，若無則自動下載安裝；自動檢測 `tabbyAPI` 目錄（缺失時自動從 GitHub clone）；若無 `.venv` 則自動建立 Python 3.13 虛擬環境並安裝 ExLlamaV3 (`.[cu13]`)。
-  2. **模型自動補全**：檢測 `models/` 目錄下是否存在 `.safetensors` 權重檔，缺失時自動透過 Hugging Face Hub 下載指定模型。
+  1. **自動環境建置 (`ensure_setup`)**：檢查系統是否安裝 `uv`，若無則自動下載安裝；自動檢測 `tabbyAPI` 目錄（缺失時自動從 GitHub clone `sam33339999/tabbyAPI` 的 `feat/minicpm-v4.7`）；若無 `.venv` 則自動建立 Python 3.13 虛擬環境並安裝 ExLlamaV3 (`.[cu13]`)。
+  2. **模型自動補全**：檢測 `models/` 目錄下是否存在 `.safetensors` 權重檔，缺失時自動透過 Hugging Face Hub 下載指定模型。MiniCPM 檢查點若附 `adapter/dist/minicpm47_exl3-*.whl`，同一輪會把它裝進 `tabbyAPI/.venv`。
   3. **套用自訂設定**：每次啟動都把倉庫的 `config.yml` 複製成 `tabbyAPI/config.yml`。要改上下文、cache 或記憶體層，改倉庫這份再重開。
   4. **投機解碼模式即時切換**：讀取環境變數 `DRAFT`，在複製後改寫 `draft_mode`（`dflash2`、`mtp`、`off`）。未設定時沿用 `config.yml` 裡的 `mtp`。
   5. **背景守護與 PID 管理 (`--bg`)**：使用 `setsid nohup` 脫鉤終端並在背景啟動服務，自動將 PID 寫入 `server.pid`，所有輸出重新導向至 `server.log`。已在跑時會拒絕再起一個。
@@ -249,14 +249,22 @@ KV cache **沒有時間過期**。請求結束後，寫滿的 page（256 token�
 
 ### 7.1 啟動與切換投機解碼模式
 
-一鍵背景啟動會套用倉庫的 `config.yml`（Q8、262K、cache 393216）：
+一鍵背景啟動是 `./start.sh --bg`，不需要先手動 clone、建 venv、裝 adapter 或下載權重。預設讀工作目錄的 `.env`。目前這份預設是 MiniCPM-V 4.7（`minicpm-4.7-35b-a3b`）：`DRAFT=off`，以及 `TABBY_MODEL_MAX_SEQ_LEN=32768`、`TABBY_MODEL_CACHE_SIZE=32768`、`TABBY_MODEL_MAX_BATCH_SIZE=1`。這三個值蓋過 `config.yml` 裡給 Qwen 用的 262K / batch 8 / MTP。
+
+2026-10-14 在這台 A100 40GB 上，未改過的 `./start.sh --bg` 可以 clone、裝好 cu13、下載 `BlackwellBoy/MiniCPM-V-4.7-35B-A3B-Derived-EXL3-4bpw`，也正確套用 `draft_mode: disabled` 與模型 id，然後在 `register_minicpm` 退出：`ModuleNotFoundError: No module named 'minicpm47_exl3'`。權重目錄裡已有 `adapter/dist/minicpm47_exl3-0.1.3-py3-none-any.whl`。裝上這個 wheel 之後，下一輪死在 `AutoProcessor.from_pretrained`，因為 `vision: true` 會建立 MiniCPM 視覺橋，而那個橋還要 `torchvision` 與 `accelerate`。
+
+`start.sh` 因此在權重到位後做這三件事，已裝過就跳過：
+
+- `uv pip install --no-deps` 該 wheel。wheel 的 metadata 把 torch 釘在 2.10，並要求從 git 編 exllamav3；照依賴裝會換掉 cu13 的 torch 2.11 與現成的 exllamav3 1.6.1。
+- 依已安裝的 torch 小版號裝對應的 cu130 torchvision（torch 2.N 對 torchvision 0.(N+15)）。裝完若 torch 版號變了，啟動直接失敗。
+- 安裝 `accelerate`，給 `VisionBridge.from_checkpoint` 的 `init_empty_weights` 用。
 
 ```bash
 cd /content/exl-colab
 
 ./start.sh --help
 
-# 預設讀 .env（目前是 Coder390）。已在跑要先 ./start.sh --stop。
+# 預設讀 .env（目前是 MiniCPM-V 4.7）。已在跑要先 ./start.sh --stop。
 ./start.sh --bg
 
 # 這次改走 Swift-1.5。權重不在 models/ 時會下載。
