@@ -265,9 +265,13 @@ ENV_FILE=.env.swift ./start.sh --bg
 # 這次改走 Coder390
 ENV_FILE=.env.coder390 ./start.sh --bg
 
+# 這次改走 DaisyRose（27B EXL3 6.00bpw，內建 MTP，128K，詳見 7.4）
+ENV_FILE=.env.daisyrose ./start.sh --bg
+
 # 把預設改掉，之後不用再帶 ENV_FILE
 cp .env.swift .env
 cp .env.coder390 .env
+cp .env.daisyrose .env
 
 # 1. 檢查點內建 MTP（draft_num_tokens 4）
 ./start.sh --bg
@@ -310,6 +314,58 @@ python3 test_concurrency.py 8
       "temperature": 0.7
     }'
   ```
+
+### 7.4 以 DaisyRose 啟動
+
+模型 `TendieLabs/DaisyRose-27B-exl3-6.00bpw-Qwen-MTP6`：EXL3 6.00bpw，權重約 21.2 GiB，Qwen MTP 頭已經在檢查點裡（6 bits），原生上下文 262144。
+
+`config.yml` 的 262K / cache 393216 是 3.5bpw 模型的配方。DaisyRose 的權重較大，`.env.daisyrose` 改用 `TABBY_MODEL_*` 環境變數在 `config.yml` 之上覆蓋三項，讓權重與 Q8 cache 在 40GB A100 上放得下：
+
+| 環境變數 | 值 | 說明 |
+|---|---|---|
+| `TABBY_MODEL_MAX_SEQ_LEN` | 131072 | 單次請求上限 128K |
+| `TABBY_MODEL_CACHE_SIZE` | 131072 | 一份 128K 請求的 Q8 cache |
+| `TABBY_MODEL_MAX_BATCH_SIZE` | 4 | 同時生成的上限 |
+
+`DRAFT=mtp` 已寫在 `.env.daisyrose` 裡，啟動時會把 `draft_mode` 設為 `mtp`、`draft_num_tokens` 設為 4，讀取檢查點內建的 MTP 頭。
+
+**一次啟動**（權重不在 `models/` 時會自動下載）：
+
+```bash
+./start.sh --stop          # 已有伺服器在跑時先停
+ENV_FILE=.env.daisyrose ./start.sh --bg
+```
+
+**把 DaisyRose 設為預設**，之後直接 `./start.sh --bg`：
+
+```bash
+cp .env.daisyrose .env
+```
+
+**確認載入的模型**（`/v1/models` 回傳的 id 要填進請求的 `model` 欄位）：
+
+```bash
+KEY=$(grep api_key tabbyAPI/api_tokens.yml | awk '{print $2}')
+curl -s http://127.0.0.1:5000/v1/models -H "Authorization: Bearer $KEY"
+# → "id": "DaisyRose-27B-exl3-6.00bpw-Qwen-MTP6"
+```
+
+**呼叫範例**：
+
+```bash
+curl -s http://127.0.0.1:5000/v1/chat/completions \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "DaisyRose-27B-exl3-6.00bpw-Qwen-MTP6",
+    "messages": [{"role": "user", "content": "你好！"}],
+    "temperature": 0.7
+  }'
+```
+
+**調大上下文**：`max_seq_len` 與 `cache_size` 一起加，`cache_size` 保持 256 的倍數且大於等於 `max_seq_len`。載入完成後 `nvidia-smi` 還有幾 GB 富餘就值得調。
+
+**切回 Coder390**：`cp .env.coder390 .env` 之後重開，或直接 `ENV_FILE=.env.coder390 ./start.sh --bg`。
 
 ---
 
